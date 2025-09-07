@@ -94,7 +94,7 @@ Below is a minimal set with practical defaults. Tune in **meters (m)** and **sec
 
 ```yaml
 world:
-  grid_resolution: 64        # 48–96 for interactive; 128+ for high fidelity
+  grid_resolution: 120       # 128+ for high fidelity >> For collision accuracy, use 120+ 
   dt: 2.0e-4                 # Reduced dynamically for CFL if too large
   bounds_min: [-0.25, 0.00, -0.25]
   bounds_max: [ 0.25, 0.50,  0.25]
