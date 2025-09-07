@@ -55,6 +55,9 @@ The cache key includes mesh path, size/mtime, voxel resolution, and the knife bl
 - Force rebuild: `--rebuild-sdf`
 - Custom cache folder: `--sdf-cache-dir <dir>`
 
+![SDF Mesh Result](assets/banana_sdf.png)
+![SDF Knife Result](assets/knife_sdf.png)
+
 Each NPZ contains:
 ```
 sdf [Nz,Ny,Nx]     origin[3]     voxel_size
@@ -73,9 +76,17 @@ If a cache is missing critical keys, an informative error suggests rebuilding.
 
 Performance note: the grid debug view now uses a cached, sub‑sampled point cloud to avoid per‑frame recomputation.
 
+
 ---
 
-## 5) Output: logging & export (unified FPS)
+## 5) MLS-MPM/CPIC Cutting Demo video
+
+![Cutting Simulation Result](assets/demo.gif)
+
+
+---
+
+## 6) Output: logging & export (unified FPS)
 
 Enable a unified output cadence by setting `output.enabled: true` in the YAML (default).
 - **Export (particles)** — `output.export: {enabled: true, out_dir: "exports", format: "npz|ply"}`
@@ -88,7 +99,7 @@ Generated files:
 
 ---
 
-## 6) YAML knobs (recommended baselines)
+## 7) YAML knobs (recommended baselines)
 
 Below is a minimal set with practical defaults. Tune in **meters (m)** and **seconds (s)**.
 
@@ -156,7 +167,7 @@ damage:
 
 ---
 
-## 7) Dev notes (code organization)
+## 8) Dev notes (code organization)
 
 - Pure helpers are **memoized** (`functools.lru_cache`), e.g., Euler→matrix and plan ordering (“center‑out”).
 - `renderer._render_grid_visualization()` now uses a cached subsample instead of generating a full grid every frame.
@@ -165,7 +176,7 @@ damage:
 
 ---
 
-## 8) CLI (full)
+## 9) CLI (full)
 
 ```text
 --config PATH                 YAML config (fallback: ./example_cutting.yaml)
@@ -193,7 +204,7 @@ damage:
 
 ---
 
-## 9) Repro tips
+## 10) Repro tips
 
 - If SDF caches become incompatible, delete `cache_sdf/*.npz` **or** run with `--rebuild-sdf`.
 - For numerical stability, the solver reduces `dt` to a CFL‑safe value at startup and clamps extreme `det(F)` during updates.
