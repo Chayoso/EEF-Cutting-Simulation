@@ -55,8 +55,10 @@ The cache key includes mesh path, size/mtime, voxel resolution, and the knife bl
 - Force rebuild: `--rebuild-sdf`
 - Custom cache folder: `--sdf-cache-dir <dir>`
 
-![SDF Mesh Result](assets/banana_sdf.png)
-![SDF Knife Result](assets/knife_sdf.png)
+<p align="center">
+  <img src="assets/banana_sdf.png" alt="SDF Mesh Result" width="350"/>
+  <img src="assets/knife_sdf.png" alt="SDF Knife Result" width="350"/>
+</p>
 
 Each NPZ contains:
 ```
