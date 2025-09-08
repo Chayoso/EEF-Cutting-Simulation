@@ -1081,7 +1081,7 @@ class MPMCuttingSim:
                     "ee_pos_m": ee["pos"],
                     "ee_normal": ee["normal"],
                     "knife": {"y_anim": ee["y_anim"], "z_offset": ee["z_offset"]},
-                    "force_world_N": {"x": float(F[0]), "y": float(F[1]), "z": float(F[2]), "norm": F_norm},
+                    "force_world_N": {"x": float(F[0]), "y": float(F[2]), "z": float(F[1]), "norm": F_norm},
                     "force_normalized": {"x": float(F_normalized[0]), "y": float(F_normalized[1]), "z": float(F_normalized[2])},
                     "scales": {"dx": dx, "dt": dt, "E": E, "vcap_dx_over_dt": vcap}
                 }

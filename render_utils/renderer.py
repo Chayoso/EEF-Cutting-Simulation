@@ -181,9 +181,9 @@ class MPMRenderer:
 
                 gui.text("")
                 gui.text("=== FORCES ===")
-                gui.text(f"Knife Applies X: {self.sim._knife_applies_force[0]:.3f} N")
-                gui.text(f"Knife Applies Y: {self.sim._knife_applies_force[1]:.3f} N")
-                gui.text(f"Knife Applies Z: {self.sim._knife_applies_force[2]:.3f} N")
+                gui.text(f"Knife Applies X [ManiSkills X]: {self.sim._knife_applies_force[0]:.3f} N")
+                gui.text(f"Knife Applies Y [ManiSkills Z]: {self.sim._knife_applies_force[1]:.3f} N")
+                gui.text(f"Knife Applies Z [ManiSkills Y]: {self.sim._knife_applies_force[2]:.3f} N")
                 gui.text(f"Force Magnitude: {np.linalg.norm(self.sim._knife_applies_force):.3f} N")
 
                 gui.text("")
