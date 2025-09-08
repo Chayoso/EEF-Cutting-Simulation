@@ -112,7 +112,8 @@ class BaseCollider:
     @ti.func
     def sample_mask(self, p):
         """Sample optional mask at world point p (1=blade, 0=not blade)."""
-        if ti.static(self.mask == None):
+        # Set in __init__ as self._has_mask = 0/1 → safe for ti.static
+        if ti.static(self._has_mask == 0):
             return 1.0
         # Default collider has no motion; subclasses can override with animation state
         return self._sample_grid(self.mask, p, self.origin[None][1], 0.0)
@@ -145,7 +146,7 @@ class KnifeCollider(BaseCollider):
     """
     def __init__(self, sdf_grid, origin, voxel_size, start_y, stop_y,
                  speed, return_speed, z_offset=0.0, friction=0.3,
-                 blade_mask_grid=None, mesh_restitution=0.01):
+                 blade_mask_grid=None, mesh_restitution=0.01, board_shape=None):
         super().__init__(sdf_grid, origin, voxel_size, friction, 0.0, mask_grid=blade_mask_grid)
         self.y = ti.field(dtype=ti.f32, shape=()); self.y[None] = float(start_y)
         self.start_y = float(start_y); self.stop_y = float(stop_y)
@@ -176,6 +177,24 @@ class KnifeCollider(BaseCollider):
         
         # Per-substep contact metric accumulator (atomic-updated in grid_respond)
         self.contact_accum_f = ti.field(dtype=ti.f32, shape=()); self.contact_accum_f[None] = 0.0
+        
+        # ---- [추가] 보드 복제 필드 ----
+        if board_shape is None:
+            board_shape = (1, 1, 1)  # 충돌 없음 더미
+
+        Nz, Ny, Nx = int(board_shape[0]), int(board_shape[1]), int(board_shape[2])
+        self.board_sdf = ti.field(dtype=ti.f32, shape=(Nz, Ny, Nx))
+        self.board_origin = ti.Vector.field(3, dtype=ti.f32, shape=())
+        self.board_voxel  = ti.field(dtype=ti.f32, shape=())
+        self.board_friction_f    = ti.field(dtype=ti.f32, shape=())
+        self.board_restitution_f = ti.field(dtype=ti.f32, shape=())
+
+        # 기본값: 충돌 없는 더미 보드
+        self.board_sdf.fill(1e6)
+        self.board_origin[None] = ti.Vector([0.0, 0.0, 0.0])
+        self.board_voxel[None]  = 1.0
+        self.board_friction_f[None]    = 0.0
+        self.board_restitution_f[None] = 0.0
         
 
     def world_low_y(self) -> float:
@@ -267,13 +286,23 @@ class KnifeCollider(BaseCollider):
         return ti.Vector([ti.f32(0.0), ti.f32(vy), ti.f32(0.0)])
 
     def attach_board(self, board):
-        """Attach a BoardCollider instance so the knife can classify board vs mesh collisions itself."""
-        self._board = board
-        try:
-            # Mark presence of board for Taichi-side logic
-            self.has_board_flag[None] = 1
-        except Exception:
-            pass
+        """
+        Call this only when you want to use board for physics collision.
+        Do not call this if you only want board rendering.
+        """
+        assert tuple(self.board_sdf.shape) == tuple(board.sdf.shape), \
+            f"board_shape mismatch: expected {self.board_sdf.shape}, got {board.sdf.shape}. " \
+            f"Pass board.sdf.shape as board_shape when creating KnifeCollider."
+
+        # Copy values (kernel only accesses copied fields)
+        self.board_sdf.copy_from(board.sdf)
+        self.board_origin[None] = board.origin[None]
+        self.board_voxel[None]  = board.voxel[None]
+        self.board_friction_f[None]    = board.friction_f[None]
+        self.board_restitution_f[None] = board.restitution_f[None]
+
+        self.has_board_flag[None] = 1
+        self._board = board  # For debugging only (kernel must not use this)
 
     @ti.kernel
     def reset_contact_counters(self):
@@ -281,30 +310,41 @@ class KnifeCollider(BaseCollider):
         self._hit_board[None] = 0
 
     @ti.func
+    def _board_sample(self, p):
+        return self._sample_grid(self.board_sdf, p, self.board_origin[None][1], 0.0)
+
+    @ti.func
+    def _board_normal(self, p):
+        h = 0.75 * self.board_voxel[None]
+        sx = self._board_sample(p + ti.Vector([h, 0.0, 0.0])) - self._board_sample(p - ti.Vector([h, 0.0, 0.0]))
+        sy = self._board_sample(p + ti.Vector([0.0, h, 0.0])) - self._board_sample(p - ti.Vector([0.0, h, 0.0]))
+        sz = self._board_sample(p + ti.Vector([0.0, 0.0, h])) - self._board_sample(p - ti.Vector([0.0, 0.0, h]))
+        n = ti.Vector([sx, sy, sz])
+        return n / (n.norm() + 1e-8)
+
+    @ti.func
     def classify_at(self, p) -> ti.i32:
         """Return 1 if knife-vs-mesh, 2 if knife-vs-board, 0 if no collision at point p."""
         dknife = self.sample(p)
-        
-        # --- board sampling guarded at compile time and runtime ---
+        eps_k = ti.f32(0.25) * self.voxel[None]
+
+        # Board path: only access copied fields
         db = 1e9
         eps_b = ti.f32(0.0)
-        if ti.static(self._board != None) and (self.has_board_flag[None] == 1):
-            db = self._board.sample(p)
-            eps_b = ti.f32(0.25) * self._board.voxel[None]
-        
-        # knife epsilon (always available)
-        eps_k = ti.f32(0.25) * self.voxel[None]
-        
+        if self.has_board_flag[None] == 1:
+            db = self._board_sample(p)
+            eps_b = ti.f32(0.25) * self.board_voxel[None]
+
         result = 0
         knife_in = dknife < eps_k
         board_in = (eps_b > 0.0) and (db < eps_b)
-        
+
         # Prefer knife when both are in contact and knife is closer
         if knife_in and (not board_in or (dknife < db)):
             result = 1
         elif board_in:
             result = 2
-        
+
         return result
 
     @ti.func
@@ -336,19 +376,21 @@ class KnifeCollider(BaseCollider):
                 else:
                     v_rel = vn_rel_new * n
                 v = v_rel + vknife
+                # Apply additional damping to reduce bouncing
+                v *= 0.95  # 5% velocity reduction per collision
                 
-        elif which == 2:
+        elif which == 2 and self.has_board_flag[None] == 1:
             # Knife ↔ Board (use board's restitution/friction)
-            if ti.static(self._board != None):
-                n = self._board.normal(pos)
-                vn = v.dot(n)
-                if vn < 0.0:
-                    # Apply restitution (energy loss) and friction
-                    vn_new = - self._board.restitution_f[None] * vn
-                    vt = v - vn * n
-                    vt *= (1.0 - self._board.friction_f[None])
-                    v = vt + vn_new * n
-            # else: no board → nothing
+            n = self._board_normal(pos)
+            vn = v.dot(n)
+            if vn < 0.0:
+                # Apply restitution (energy loss) and friction
+                vn_new = - self.board_restitution_f[None] * vn
+                vt = v - vn * n
+                vt *= (1.0 - self.board_friction_f[None])
+                v = vt + vn_new * n
+                # Apply additional damping to reduce bouncing
+                v *= 0.95  # 5% velocity reduction per collision
         return v
 
 

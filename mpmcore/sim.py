@@ -214,6 +214,12 @@ class MPMCuttingSim:
 
 
         blade_mask = knife_pack.get("blade_mask", None)
+        
+        # Determine board_shape: use board's shape if available, otherwise dummy shape
+        board_shape = (1, 1, 1)  # Default dummy shape
+        if board_pack is not None:
+            board_shape = board_pack["sdf"].shape
+        
         knife = KnifeCollider(
             sdf_grid=knife_sdf, origin=knife_pack["origin"], voxel_size=voxel,
             start_y=start_y_tip, stop_y=stop_y_tip,
@@ -222,7 +228,8 @@ class MPMCuttingSim:
             z_offset=float(motion.get("z_offset", 0.0)),
             friction=float(cfg["knife"].get("friction", 0.3)),
             blade_mask_grid=blade_mask,
-            mesh_restitution=float(bc.get("restitution", 0.01))
+            mesh_restitution=float(bc.get("restitution", 0.01)),
+            board_shape=board_shape
         )
         self.knife = knife
         # Normalize contact metric in KnifeCollider to dx/dt scale (~cap speed)
@@ -247,15 +254,25 @@ class MPMCuttingSim:
             )
             print(f"[info] Board initialized successfully")
         else:
-            self.board = None
-            print(f"[INFO] Board disabled (no board pack)")
+            # Create dummy board for collision functions (no collision)
+            dummy_sdf = np.full((1, 1, 1), 1e6, dtype=np.float32)  # Always positive (no collision)
+            self.board = BoardCollider(
+                sdf_grid=dummy_sdf, origin=[0, 0, 0], voxel_size=1.0,
+                friction=0.0, restitution=0.0
+            )
+            print(f"[INFO] Dummy board created (no collision)")
         self.colliders = MultiCollider(knife=self.knife, board=self.board) if self.board is not None else MultiCollider(knife=self.knife)
-        # Attach board only if present
-        if self.board is not None:
+        
+        # Call attach_board only when using board for physics collision
+        # Do not call when only enabling board for rendering (keep has_board_flag=0)
+        if board_pack is not None:
             try:
                 self.knife.attach_board(self.board)
+                print(f"[knife] Board physics attached successfully")
             except Exception as e:
                 print(f"[knife] attach_board failed: {e}")
+        else:
+            print(f"[knife] Board physics disabled (render only)")
 
         # ----- viewer -----
         self.viewer_enabled = bool(viewer)
@@ -509,9 +526,9 @@ class MPMCuttingSim:
         self.max_speed_f = ti.field(dtype=ti.f32, shape=()); self.max_speed_f[None] = 0.0
         self.min_J_f     = ti.field(dtype=ti.f32, shape=()); self.min_J_f[None]     = 1e9
         self.max_J_f     = ti.field(dtype=ti.f32, shape=()); self.max_J_f[None]     = -1e9
-        self.speed_cap_f = ti.field(dtype=ti.f32, shape=()); self.speed_cap_f[None] = float(stcfg.get("max_speed_cap", 8.0))
+        self.speed_cap_f = ti.field(dtype=ti.f32, shape=()); self.speed_cap_f[None] = float(stcfg.get("max_speed_cap", 4.0))  
         # Resolution-aware grid speed cap factor (v_max_grid = factor * dx/dt)
-        self.grid_speed_cap_factor_f = ti.field(dtype=ti.f32, shape=()); self.grid_speed_cap_factor_f[None] = float(stcfg.get("grid_speed_cap_factor", 0.65))
+        self.grid_speed_cap_factor_f = ti.field(dtype=ti.f32, shape=()); self.grid_speed_cap_factor_f[None] = float(stcfg.get("grid_speed_cap_factor", 0.45))  
 
         self.J_clamp_lo_f = ti.field(dtype=ti.f32, shape=()); self.J_clamp_lo_f[None] = float(stcfg.get("J_clamp_min", 0.3))
         self.J_clamp_hi_f = ti.field(dtype=ti.f32, shape=()); self.J_clamp_hi_f[None] = float(stcfg.get("J_clamp_max", 3.0))
@@ -778,6 +795,8 @@ class MPMCuttingSim:
             new_v += self.dt * self.gravity[None]
 
             part.v = (1.0 - self.particle_damping) * new_v
+            # Apply additional velocity damping to reduce bouncing
+            part.v *= 0.98  # 2% additional damping per timestep
             # speed cap
             # Enhanced speed cap with gradual limiting
             v2 = part.v.dot(part.v)
@@ -786,8 +805,8 @@ class MPMCuttingSim:
                 # Gradual speed reduction for better stability
                 v_norm = ti.sqrt(v2 + 1e-6)
                 scale = self.speed_cap_f[None] / v_norm
-                # Apply gradual reduction instead of hard cap
-                part.v *= 0.9 * scale + 0.1  # 90% of cap + 10% of current
+                # Apply stronger reduction to minimize bouncing
+                part.v *= 0.7 * scale + 0.3  # 70% of cap + 30% of current (more aggressive)
             part.C = new_C
 
             # deformation gradient update + improved J clamp

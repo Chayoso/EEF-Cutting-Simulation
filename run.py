@@ -229,7 +229,7 @@ def main():
                     # Target board bottom (to touch floor particles)
                     floor_height = world_bounds_min[1] + 0.05 * dx  # Floor particle height (increased from 0.01 to 0.05)
                     board_bottom = board_origin[1] + (y_min_b + 0.5) * board_voxel
-                    board_floor_gap = float(cfg.get("board", {}).get("floor_gap", 0.005)) * dx  # Configurable gap between board and floor
+                    board_floor_gap = float(cfg.get("board", {}).get("floor_gap", 0.1)) * dx  # Configurable gap between board and floor
                     # Use gap to adjust board position relative to cutting mesh
                     target_board_bottom = floor_height + board_floor_gap + gap
                     offset = target_board_bottom - board_bottom

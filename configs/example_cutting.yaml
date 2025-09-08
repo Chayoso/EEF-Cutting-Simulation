@@ -27,7 +27,7 @@ cutting_mesh:
     poisson_ratio: 0.3             # Poisson's ratio
   grid_damping_ratio: 0.06         # Grid damping
   particle_damping: 0.05           # Particle damping
-  restitution: 0.05                # Restitution coefficient (affects knife speed reduction)
+  restitution: 0.005               # Restitution coefficient (affects knife speed reduction)
 
 
 # -----------------------------------------------------------------------------
