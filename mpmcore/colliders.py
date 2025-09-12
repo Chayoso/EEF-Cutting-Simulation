@@ -167,20 +167,23 @@ class KnifeCollider(BaseCollider):
         # Smooth speed control (tunable)
         self.base_speed = float(speed)
         self.current_speed = ti.field(dtype=ti.f32, shape=()); self.current_speed[None] = float(speed)
-        self.min_speed_f = ti.field(dtype=ti.f32, shape=()); self.min_speed_f[None] = 0.8 * float(speed)  # 25% floor
+        # Minimum speed floor (fraction of base speed). Lower default to allow real deceleration.
+        self.min_speed_f = ti.field(dtype=ti.f32, shape=()); self.min_speed_f[None] = 0.10 * float(speed)  # 10% floor (will be overridden from YAML)
         # Apply restitution to cut_tau: lower restitution = slower decay (less speed reduction)
         base_tau = 1.0  # [s] base decay time constant (increased for slower speed changes)
         restitution_factor = 1.0 + (1.0 - float(mesh_restitution))  # 1.0 to 2.0 range (inverted)
         self.cut_tau_f = ti.field(dtype=ti.f32, shape=()); self.cut_tau_f[None] = base_tau * restitution_factor
         self.rec_tau_f = ti.field(dtype=ti.f32, shape=()); self.rec_tau_f[None] = 0.6   # [s] recovery time constant
-        self.c_norm_f = ti.field(dtype=ti.f32, shape=()); self.c_norm_f[None] = 1.0    # [m/s] normalize contact metric (increased for less sensitivity)
+        self.c_norm_f = ti.field(dtype=ti.f32, shape=()); self.c_norm_f[None] = 1.0    # [m/s] normalize contact metric (will be set from YAML)
         
         # Per-substep contact metric accumulator (atomic-updated in grid_respond)
         self.contact_accum_f = ti.field(dtype=ti.f32, shape=()); self.contact_accum_f[None] = 0.0
+        # Telemetry: last normalized contact (ĉ in [0,1])
+        self.last_c_hat_f = ti.field(dtype=ti.f32, shape=()); self.last_c_hat_f[None] = 0.0
         
-        # ---- [추가] 보드 복제 필드 ----
+        # ---- [Additional] Board replication fields ----
         if board_shape is None:
-            board_shape = (1, 1, 1)  # 충돌 없음 더미
+            board_shape = (1, 1, 1)  # No collision dummy
 
         Nz, Ny, Nx = int(board_shape[0]), int(board_shape[1]), int(board_shape[2])
         self.board_sdf = ti.field(dtype=ti.f32, shape=(Nz, Ny, Nx))
@@ -189,7 +192,7 @@ class KnifeCollider(BaseCollider):
         self.board_friction_f    = ti.field(dtype=ti.f32, shape=())
         self.board_restitution_f = ti.field(dtype=ti.f32, shape=())
 
-        # 기본값: 충돌 없는 더미 보드
+        # Default: no collision dummy board
         self.board_sdf.fill(1e6)
         self.board_origin[None] = ti.Vector([0.0, 0.0, 0.0])
         self.board_voxel[None]  = 1.0
@@ -218,40 +221,22 @@ class KnifeCollider(BaseCollider):
                 y_new = self.start_y; self._down[None] = 1
         self.y[None] = y_new
         
-        # Physical speed control based on cutting resistance
-        # Pull out accumulated contact metric (Σ max(0, -vn_rel)) and reset
+        # Physical speed control (Quadratic): du/dt = -k2 * c_hat * u^2,  u = s/s0
         c = float(self.contact_accum_f[None]); self.contact_accum_f[None] = 0.0
-        c_hat = min(1.0, c / max(1e-4, float(self.c_norm_f[None])))  # normalize to [0,1]
-        
-        s = float(self.current_speed[None])
-        s0 = float(self.base_speed)
-        s_min = float(self.min_speed_f[None])
-        
-        # Physical cutting resistance model - enhanced for stronger speed reduction
+        c_hat = min(1.0, c / max(1e-4, float(self.c_norm_f[None])))  # ∈[0,1]
+        self.last_c_hat_f[None] = c_hat  # Store for telemetry
+        s    = float(self.current_speed[None]); s0 = float(self.base_speed)
+        s_min= float(self.min_speed_f[None])
+        k2   = float(getattr(self, "res_kq_per_s", 4.0))  # [1/s] - injected from YAML in sim.py
         if int(self._down[None]) == 1 and c_hat > 1e-4:
-            # Model cutting resistance as a force opposing knife motion
-            # F_resistance = k * contact_area * velocity^2 (quadratic drag)
-            # This creates more realistic speed reduction under load
-            resistance_coeff = 2.0  # Increased resistance coefficient (0.5 → 2.0)
-            velocity_factor = (s / s0) ** 1.5  # Moderate velocity dependence (2.0 → 1.5)
-            resistance_force = resistance_coeff * c_hat * velocity_factor
-            
-            # Apply resistance as acceleration: a = F/m (simplified mass = 1)
-            # Speed change: dv = -a * dt
-            speed_reduction = resistance_force * dt
-            s = max(s_min, s - speed_reduction)
-        
-        # Natural recovery toward base speed (like spring restoring force)
+            # Semi‑implicit update: u_next = u / (1 + k2 * c_hat * u * dt)
+            u = max(1e-6, s / max(1e-6, s0))
+            s = s / (1.0 + (k2 * c_hat * u) * dt)
+        # Recovery toward base speed when rising or no contact: s' = (s0 - s)/tau
         if int(self._down[None]) == 0 or c_hat < 1e-4:
-            # Recovery force proportional to speed difference
-            recovery_force = 0.3  # Increased recovery coefficient (0.1 → 0.3)
-            speed_difference = s0 - s
-            speed_increase = recovery_force * speed_difference * dt
-            s = min(s0, s + speed_increase)
-        
-        # Clamp between [s_min, s0]
-        s = max(s_min, min(s, s0))
-        self.current_speed[None] = s
+            tau = float(self.rec_tau_f[None])  # [s]
+            s += (s0 - s) * (dt / max(1e-4, tau))
+        self.current_speed[None] = max(s_min, min(s, s0))
 
     @ti.func
     def sample(self, p):

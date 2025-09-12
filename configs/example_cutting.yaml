@@ -46,6 +46,10 @@ knife:
     return_speed_mps: 1.5          # Return speed (m/s)
     z_offset: 0.0                  # Z-axis offset
   friction: 0.03
+  min_speed_floor_ratio: 0.10     # Minimum speed floor: s_min = 0.10 * s0 (0.05~0.15 recommended)
+  speed_resistance:
+    c_norm_scale: 0.35            # Contact normalization scale: c_norm = 0.35 * dx/dt
+    k_quad_per_s: 4.0             # Quadratic coefficient k2 [1/s] (full contact t_half ≈ 1/k2)
 # -----------------------------------------------------------------------------
 # Cutting Board
 # -----------------------------------------------------------------------------
@@ -73,7 +77,7 @@ viewer:
 # Cutting Algorithm Parameters
 # -----------------------------------------------------------------------------
 cutting:
-  slices: 10                        # Number of cutting slices
+  slices: 10                       # Number of cutting slices
   z_margin_ratio: 0.05             # Z-axis margin ratio (use full range for multicut)
   cut_order: right-to-left         # Cutting order: center-out, left-to-right, right-to-left, left-right, right-left
   dwell_frames: 6                  # Dwell frames between cuts
@@ -89,7 +93,7 @@ cutting:
 # Damage Model
 # -----------------------------------------------------------------------------
 damage:
-  damage_v_hat: 0.010               # Damage velocity threshold
+  damage_v_hat: 0.35                # Damage velocity threshold (0.30~0.45 recommended for stronger cutting threshold)
   damage_band: 0.0025               # Damage band width 
   damage_visualization: true        # Enable damage visualization
 
@@ -123,7 +127,8 @@ output:
   export:
     enabled: false                 # Enable export
     out_dir: exports               # Export directory
-    format: npz                    # Export format: npz, ply
+    format: ply                    # Export format: npz, ply
   logging:
     enabled: true                  # Enable logging
     out_dir: logs                  # Log directory
+    axis_map: maniskill            # maniskill(=y↔z swap) | world(no swap)

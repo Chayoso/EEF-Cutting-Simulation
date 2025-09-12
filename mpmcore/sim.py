@@ -232,11 +232,43 @@ class MPMCuttingSim:
             board_shape=board_shape
         )
         self.knife = knife
-        # Normalize contact metric in KnifeCollider to dx/dt scale (~cap speed)
-        try:
-            self.knife.c_norm_f[None] = 0.35 * float(self.dx_s[None]) / max(1e-6, float(self.dt))
-        except Exception:
-            pass
+        # ---- speed‑resistance & floor (from YAML; defaults keep current behavior) ----
+        kcfg = cfg.get("knife", {})
+        sres = kcfg.get("speed_resistance", {})
+        c_scale = float(sres.get("c_norm_scale", 0.35))                # c_norm = c_scale * dx/dt
+        self.knife.c_norm_f[None] = c_scale * float(self.dx_s[None]) / max(1e-6, float(self.dt))
+        
+        # ---- material-dependent k2 scaling (no YAML key expansion) ----
+        k2_base = float(sres.get("k_quad_per_s", 4.0))   # [1/s] baseline from YAML
+        # current material properties
+        E_cur = float(ecfg.get("youngs_modulus", 3.0e5)) # Pa
+        sigma_y_cur = float(self.cfg.get("plasticity", {}).get("yield_stress_kpa", 0.0)) * 1e3  # Pa
+        # soft-food friendly baselines (tunable constants)
+        E_ref = 3.0e5     # Pa
+        sigma_ref = 5.0e3 # Pa (5 kPa)
+        # exponents (kept in code to avoid YAML expansion)
+        alpha_E = 0.5
+        beta_sig = 1.0
+        # guard against zeros
+        E_ratio = max(E_cur, 1e-6) / E_ref
+        sig_ratio = max(sigma_y_cur, 1.0) / sigma_ref
+        mat_gain = (E_ratio ** alpha_E) * (sig_ratio ** beta_sig)
+        k2_eff = k2_base * mat_gain
+        # apply to knife resistance model
+        self.knife.res_kq_per_s = float(k2_eff)          # KnifeCollider.update() uses this k2
+        
+        # ---- keep speed floor as-is (from YAML) ----
+        floor_ratio = float(kcfg.get("min_speed_floor_ratio", 0.25))
+        self.knife.min_speed_f[None] = floor_ratio * float(self.knife.base_speed)
+        
+        # ---- stash telemetry for JSON/debug ----
+        self._k2_base = float(k2_base)
+        self._k2_eff = float(k2_eff)
+        self._k2_mat_gain = float(mat_gain)
+        self._E_cur = float(E_cur)
+        self._sigma_y_cur = float(sigma_y_cur)
+        self._E_ref = float(E_ref)
+        self._sigma_ref = float(sigma_ref)
 
         self.board = None
         if board_pack is not None:
@@ -502,6 +534,19 @@ class MPMCuttingSim:
         self.damage_visualization = bool(dmg.get("damage_visualization", True))
 
         pcfg = cfg.get("plasticity", {})
+        
+        # --- Force-gated cutting: min normalized contact ĉ threshold ---
+        # Auto from material if YAML not provided: grows with toughness (σy) and stiffness (E)
+        try:
+            E_cur = float(ecfg.get("youngs_modulus", E))
+        except Exception:
+            E_cur = E
+        sigma_y_cur = float(pcfg.get("yield_stress_kpa", 0.0)) * 1e3  # Pa
+        c_auto = 0.09 * (max(1e-6, sigma_y_cur) / 5e3)**0.6 * (max(1e-6, E_cur) / 3e5)**0.2
+        c_auto = max(0.05, min(0.60, c_auto))  # clamp to [0.05, 0.60]
+        self.c_hat_cut_min_f = ti.field(dtype=ti.f32, shape=())
+        self.c_hat_cut_min_f[None] = float(dmg.get("c_hat_cut_min", c_auto))
+
         self.plastic_enabled = ti.field(dtype=ti.i32, shape=()); self.plastic_enabled[None] = 1 if pcfg.get("enabled", False) else 0
         self.plastic_model   = (pcfg.get("model", "off") or "off").lower()
         self.sigma_y0_f = ti.field(dtype=ti.f32, shape=()); self.sigma_y0_f[None] = float(pcfg.get("yield_stress_kpa", 0.0)) * 1e3
@@ -679,6 +724,15 @@ class MPMCuttingSim:
                     ti.atomic_add(self.knife_impulse_g[None][0], m * dv[0])
                     ti.atomic_add(self.knife_impulse_g[None][1], m * dv[1])
                     ti.atomic_add(self.knife_impulse_g[None][2], m * dv[2])
+                    # Split accumulators: blade vs handle (for EEF force averaging)
+                    if self.knife.is_blade(pos) == 1:
+                        ti.atomic_add(self.knife_impulse_blade_g[None][0], m * dv[0])
+                        ti.atomic_add(self.knife_impulse_blade_g[None][1], m * dv[1])
+                        ti.atomic_add(self.knife_impulse_blade_g[None][2], m * dv[2])
+                    else:
+                        ti.atomic_add(self.knife_impulse_handle_g[None][0], m * dv[0])
+                        ti.atomic_add(self.knife_impulse_handle_g[None][1], m * dv[1])
+                        ti.atomic_add(self.knife_impulse_handle_g[None][2], m * dv[2])
                     ti.atomic_add(self.knife_mesh_collision_detected[None], 1)
                 elif contact == 2:
                     # Board contact
@@ -768,7 +822,7 @@ class MPMCuttingSim:
                     dknife_local = self.knife.sample(part.x)
                     n_tip = self.knife.normal(part.x)
                     # Project onto tangent plane for vertical cutting
-                    ey = ti.Vector([ti.f32(0.0), ti.f32(1.0), ti.f32(0.0)])   # Y축 방향으로 변경
+                    ey = ti.Vector([ti.f32(0.0), ti.f32(1.0), ti.f32(0.0)])   # Y-axis direction
                     t_raw = ey - (ey.dot(n_tip)) * n_tip                      # project onto tangent plane
                     t_len = t_raw.norm()
                     t_planar = ti.Vector([ti.f32(1.0), ti.f32(0.0), ti.f32(0.0)])  # fallback
@@ -849,7 +903,7 @@ class MPMCuttingSim:
                     if self.knife._down[None] == 0:
                         mu *= 0.10  # rising stroke: drastically lower friction to avoid adhesion
                     
-                    # Initialize vt_new
+                    # Initialize vt_new 
                     vt_new = vt_rel
                     vt_len = vt_rel.norm()
                     if vt_len > 1e-6:
@@ -866,8 +920,13 @@ class MPMCuttingSim:
                     part.x -= (d - eps_clear) * n
                 # DO NOT push out when d >= 0 (outside): avoids lifting particles during rise
 
-                # Cutting allowed only by the blade on down-stroke
-                if (self.knife.is_blade(part.x) == 1) and (ti.abs(self.knife.sample(part.x)) < self.damage_band_f[None]) and (vn_rel < -self.damage_v_threshold_f[None]) and (self.knife._down[None] == 1):
+                # Cutting allowed only by the blade on down-stroke + require sufficient contact (ĉ_now)
+                c_hat_now = ti.min(ti.f32(1.0), self.knife.contact_accum_f[None] / (self.knife.c_norm_f[None] + 1e-6))
+                if (self.knife.is_blade(part.x) == 1) \
+                   and (ti.abs(self.knife.sample(part.x)) < self.damage_band_f[None]) \
+                   and (vn_rel < -self.damage_v_threshold_f[None]) \
+                   and (self.knife._down[None] == 1) \
+                   and (c_hat_now >= self.c_hat_cut_min_f[None]):
                     push_distance = self.damage_band_f[None] - ti.abs(self.knife.sample(part.x))
                     normalized_push = push_distance / self.damage_band_f[None]
                     push_direction = 1.0 if self.knife.sample(part.x) > 0.0 else -1.0
@@ -1073,36 +1132,54 @@ class MPMCuttingSim:
         # Unified output manager (export + logging) at fixed FPS
         if self._out_manager is not None:
             def _make_rec(sim, sim_time, frame_idx):
-                # Use same force calculation as window display (_knife_applies_force)
                 ee = sim.get_end_effector_state(sim_time)
-                if ee is None: return None
-                
-                # Calculate force exactly like window display
-                imp = sim.knife_impulse_g[None]
-                F = np.array([
-                    float(imp[0] / sim.dt),
-                    float(imp[1] / sim.dt), 
-                    float(imp[2] / sim.dt)
-                ], dtype=np.float32)
-                
-                # Normalize force vector
+                if ee is None:
+                    return None
+                # ---- FPS‑frame averaged force from substep accumulators ----
+                Jb = sim._J_blade_accum
+                Jh = sim._J_handle_accum
+                J_sum = Jb + Jh
+                dt_acc = max(1e-6, sim._accum_time)
+                F = (J_sum / dt_acc).astype(np.float32)
                 F_norm = float(np.linalg.norm(F) + 1e-6)
                 F_normalized = F / F_norm
-                
-                # Normalized scalars
+                # Consume accumulators (start fresh for next frame window)
+                sim._J_blade_accum[:] = 0.0
+                sim._J_handle_accum[:] = 0.0
+                sim._J_board_accum[:]  = 0.0
+                sim._accum_time = 0.0
+                # Axis mapping for JSON (Y↔Z swap for ManiSkill)
+                axis_map = str(sim.cfg.get("output", {}).get("logging", {}).get("axis_map", "maniskill")).lower()
+                if axis_map == "maniskill":
+                    f_out = {"x": float(F[0]), "y": float(F[2]), "z": float(F[1]), "norm": F_norm}
+                    f_out_n = {"x": float(F_normalized[0]), "y": float(F_normalized[2]), "z": float(F_normalized[1])}
+                else:
+                    f_out = {"x": float(F[0]), "y": float(F[1]), "z": float(F[2]), "norm": F_norm}
+                    f_out_n = {"x": float(F_normalized[0]), "y": float(F_normalized[1]), "z": float(F_normalized[2])}
+                # Normalized scalars (for context)
                 dx, dt, E = float(sim.dx_units), float(sim.dt_units), float(sim.E_units)
                 vcap = dx / max(1e-6, dt)
-                
                 return {
-                    "frame": int(frame_idx),  # Rendering frame number (continuous)
-                    "timestep": int(sim._frame),  # Physics timestep number
+                    "frame": int(frame_idx),
+                    "timestep": int(sim._frame),
                     "time": float(sim_time),
                     "ee_pos_m": ee["pos"],
                     "ee_normal": ee["normal"],
                     "knife": {"y_anim": ee["y_anim"], "z_offset": ee["z_offset"]},
-                    "force_world_N": {"x": float(F[0]), "y": float(F[2]), "z": float(F[1]), "norm": F_norm},
-                    "force_normalized": {"x": float(F_normalized[0]), "y": float(F_normalized[1]), "z": float(F_normalized[2])},
-                    "scales": {"dx": dx, "dt": dt, "E": E, "vcap_dx_over_dt": vcap}
+                    "force_world_N": f_out,
+                    "force_normalized": f_out_n,
+                    "scales": {"dx": dx, "dt": dt, "E": E, "vcap_dx_over_dt": vcap},
+                    "telemetry": {
+                        "material": {"E_Pa": sim._E_cur, "sigma_y_Pa": sim._sigma_y_cur,
+                                     "E_ref_Pa": sim._E_ref, "sigma_ref_Pa": sim._sigma_ref},
+                        "knife_resistance": {
+                            "k2_base_per_s": sim._k2_base,
+                            "k2_eff_per_s": sim._k2_eff,
+                            "mat_gain": sim._k2_mat_gain,
+                            "c_hat": float(sim.knife.last_c_hat_f[None]),
+                            "c_hat_current": float(min(1.0, sim.knife.contact_accum_f[None] / max(1e-6, sim.knife.c_norm_f[None])))
+                        }
+                    }
                 }
             self._out_manager.on_step(self, T, _make_rec)
 
