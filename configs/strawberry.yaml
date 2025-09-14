@@ -118,7 +118,7 @@ stability:
 # Output and Logging
 # -----------------------------------------------------------------------------
 output:
-  enabled: true                    # Enable output
+  enabled: false                   # Enable output
   fps: 60.0                        # Output frame rate (for testing)
   export:
     enabled: false                 # Enable export
