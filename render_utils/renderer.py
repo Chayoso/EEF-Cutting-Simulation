@@ -70,7 +70,9 @@ class MPMRenderer:
                 nd = ti.abs(self.sim.knife.sample(X)) / band_eps
                 self.sim.p_color[p] = self._get_cutting_color(1.0 - nd)
             else:
-                self.sim.p_color[p] = ti.Vector([1.0, 1.0, 0.0])
+                # self.sim.p_color[p] = ti.Vector([1.0, 1.0, 0.0])  # yellow
+                self.sim.p_color[p] = ti.Vector([1.0, 0.0, 0.0])  # red
+                # self.sim.p_color[p] = ti.Vector([0.0, 1.0, 0.0])  # green
 
     def _update_cut_colors(self, band_eps: float):
         self._recolor_full_kernel(float(band_eps))
