@@ -1254,7 +1254,7 @@ class MPMCuttingSim:
 
 
 
-    def run(self, *, run_sim=True, max_frames=10_000):
+    def run(self, *, run_sim=True, max_frames=50_000):  # CHANGE MAX_FRAMES!
         # Seed cutting mesh above board
         top = None
         if self.board is not None:

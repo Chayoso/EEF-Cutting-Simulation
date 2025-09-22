@@ -1,0 +1,14 @@
+# Blender 4.5.2 LTS MTL File: 'Orange_internal.blend'
+# www.blender.org
+
+newmtl Material.003
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.450000
+d 1.000000
+illum 2
+map_Kd C:/Users/vivei/Downloads/d/ddd_centet_BaseColor.png
+map_Ns C:/Users/vivei/Downloads/d/ddd_centet_Roughness.png
+map_refl C:/Users/vivei/Downloads/d/ddd_centet_Metallic.png
+map_Bump -bm 1.000000 C:/Users/vivei/Downloads/d/ddd_centet_Normal.png

@@ -9,7 +9,7 @@ world:
   grid_resolution: 120              # delta x should be 4.2 X 10e-3 meters
   bounds_min: [-0.25, 0.0, -0.25]   # [x_min, y_min, z_min]
   bounds_max: [0.25, 0.5, 0.25]     # [x_max, y_max, z_max]
-  dt: 7.0e-5                        # Time step, originally 2.0e-5; try 5e-5 and 7e-5
+  dt: 5.0e-6                        # Time step
   substeps: 6                       # Sub-steps per frame
   gravity: [0.0, -9.81, 0.0]        # Gravity vector [x, y, z] Current Ignore
   reso_exponent: 1.0
@@ -20,14 +20,14 @@ world:
 cutting_mesh:
   mesh_path: assets/melon.obj
   sdf_voxel: 192
-  density: 1050.0             # slightly higher to resist particle fly-off
-  particle_spacing: 0.0025
+  density: 1100.0             # kg/m³
+  particle_spacing: 0.002
   elasticity:
-    youngs_modulus: 1.2e6     # stiffer — reduces local over-deformation
-    poisson_ratio: 0.40       # slightly lower to improve solver stability
-  grid_damping_ratio: 0.08    # reduce damping slightly — less jello effect
-  particle_damping: 0.08
-  restitution: 0.01           # still very low bounce
+    youngs_modulus: 1.2e6     # Pa
+    poisson_ratio: 0.45
+  grid_damping_ratio: 0.06    # 0.06 - 0.15
+  particle_damping: 0.85
+  restitution: 0.005
 
 
 # -----------------------------------------------------------------------------
@@ -42,8 +42,8 @@ knife:
   motion:
     knife_start_y: 0.225 # 0.125   # Starting Y position
     knife_stop_y: -0.01            # Stopping Y position
-    cutting_speed_mps: 1.5         # Cutting speed (m/s)
-    return_speed_mps: 1.5          # Return speed (m/s)
+    cutting_speed_mps: 6.0         # Cutting speed (m/s)
+    return_speed_mps: 6.0          # Return speed (m/s)
     z_offset: 0.0                  # Z-axis offset
   friction: 0.03
 # -----------------------------------------------------------------------------
@@ -73,7 +73,7 @@ viewer:
 # Cutting Algorithm Parameters
 # -----------------------------------------------------------------------------
 cutting:
-  slices: 10                        # Number of cutting slices
+  slices: 6                        # Number of cutting slices
   z_margin_ratio: 0.05             # Z-axis margin ratio (use full range for multicut)
   cut_order: right-to-left         # Cutting order: center-out, left-to-right, right-to-left, left-right, right-left
   dwell_frames: 6                  # Dwell frames between cuts
@@ -89,7 +89,7 @@ cutting:
 # Damage Model
 # -----------------------------------------------------------------------------
 damage:
-  damage_v_hat: 0.010               # Damage velocity threshold
+  damage_v_hat: 0.35                # Damage velocity threshold
   damage_band: 0.0025               # Damage band width
   damage_visualization: true        # Enable damage visualization
 
@@ -118,12 +118,13 @@ stability:
 # Output and Logging
 # -----------------------------------------------------------------------------
 output:
-  enabled: false                   # Enable output
-  fps: 60.0                        # Output frame rate (for testing)
+  enabled: true                 # Enable output
+  fps: 60.0                     # Output frame rate (for testing)
   export:
-    enabled: false                 # Enable export
-    out_dir: exports               # Export directory
-    format: npz                    # Export format: npz, ply
+    enabled: true               # Enable export
+    out_dir: exports_melon      # Export directory
+    format: ply                 # Export format: npz, ply
   logging:
-    enabled: true                  # Enable logging
-    out_dir: logs                  # Log directory
+    enabled: true               # Enable logging
+    out_dir: logs               # Log directory
+    axis_map: maniskill         # maniskill(=y↔z swap) | world(no swap)

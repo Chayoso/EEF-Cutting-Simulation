@@ -1,7 +1,7 @@
-# Blender 4.5.2 LTS MTL File: 'None'
+# Blender 4.5.2 LTS MTL File: 'Orange_internal.blend'
 # www.blender.org
 
-newmtl blinn1SG
+newmtl blinn1SG.001
 Ns 0.000000
 Ka 1.000000 1.000000 1.000000
 Kd 0.800000 0.800000 0.800000

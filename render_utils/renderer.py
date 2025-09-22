@@ -71,9 +71,11 @@ class MPMRenderer:
                 self.sim.p_color[p] = self._get_cutting_color(1.0 - nd)
             else:
                 # self.sim.p_color[p] = ti.Vector([1.0, 1.0, 0.0])  # yellow
-                # self.sim.p_color[p] = ti.Vector([1.0, 0.0, 0.0])  # red
+                self.sim.p_color[p] = ti.Vector([1.0, 0.0, 0.0])  # red
                 # self.sim.p_color[p] = ti.Vector([0.0, 0.2, 0.0])  # dark green
-                self.sim.p_color[p] = ti.Vector([1.0, 0.6, 0.4])  # peach color
+                # self.sim.p_color[p] = ti.Vector([1.0, 0.6, 0.4])  # peach color
+                # self.sim.p_color[p] = ti.Vector([0.9, 1.0, 0.85])  # light green
+                # self.sim.p_color[p] = ti.Vector([1.0, 0.55, 0.0])  # orange
 
     def _update_cut_colors(self, band_eps: float):
         self._recolor_full_kernel(float(band_eps))
