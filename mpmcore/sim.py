@@ -120,6 +120,10 @@ class MPMCuttingSim:
                  viewer_camera_mode="manual", viewer_initial_pose=None, viewer_lock_on_run=True):
         _ensure_ti()
         self.cfg = cfg
+        # Physics clock (advances by dt≈2e-5 s)
+        self.sim_time = 0.0
+        # Visual clock for saw‐cut (advances by ~1/60 s per frame)
+        self.saw_time = 0.0
 
         # ----- world/grid -----
         wcfg = cfg["world"]
@@ -208,6 +212,13 @@ class MPMCuttingSim:
         self._knife_yfoot = float((ymin_idx + 0.5) * voxel)
 
         motion = cfg["knife"]["motion"]
+        # ── Saw-cut configuration ─────────────────────────────────────────
+        cut_mode = motion.get("cut_mode", "cut")
+        saw_cfg = motion.get("saw", {})
+        saw_amplitude = float(saw_cfg.get("amplitude_m", 0.0))
+        saw_frequency = float(saw_cfg.get("frequency_hz", 0.0))
+        saw_axis = saw_cfg.get("axis", "x").lower()
+
         start_y_tip = float(motion.get("knife_start_y", 0.30)) - self._knife_yfoot
         stop_y_tip  = float(motion.get("knife_stop_y",  0.00)) - self._knife_yfoot
 
@@ -229,7 +240,12 @@ class MPMCuttingSim:
             friction=float(cfg["knife"].get("friction", 0.3)),
             blade_mask_grid=blade_mask,
             mesh_restitution=float(bc.get("restitution", 0.01)),
-            board_shape=board_shape
+            board_shape=board_shape,
+            # saw-cut parameters:
+            cut_mode=cut_mode,
+            saw_amplitude=saw_amplitude,
+            saw_frequency=saw_frequency,
+            saw_axis=saw_axis,
         )
         self.knife = knife
         # ---- speed‑resistance & floor (from YAML; defaults keep current behavior) ----
@@ -341,11 +357,13 @@ class MPMCuttingSim:
         self.z_margin_ratio= float(cutcfg.get("z_margin_ratio", 0.05))
         self.cut_order     = str(cutcfg.get("cut_order", "left-to-right")).lower()
         self.dwell_frames  = int(cutcfg.get("dwell_frames", 6))
-        self.multi_cutting_enabled = (self.num_cuts is not None and self.num_cuts >= 1)
+        #self.multi_cutting_enabled = (self.num_cuts is not None and self.num_cuts >= 1)
+        self.multi_cutting_enabled = True
         self._multi_init_done = False
         self._dwell_counter = 0
         self.current_cut_idx = 0
         self.cutting_complete = False
+        self._slice_hit_bottom = False  # Have we seen the blade hit the board?
         self.z_positions = None
         self._z_offsets = None
         try:
@@ -1049,7 +1067,18 @@ class MPMCuttingSim:
             if knife_low <= board_tolerance + float(self.pushout_eps[None]):
                 self.knife.force_up()
 
-        # Animate knife
+
+        # ─── Visual saw-cut timer (once per drawn frame) ─────────
+        # Advance at ≈60 Hz so you actually *see* the oscillation
+        slow_factor = 3.0  # 1 = reg speed, 5 = 5x slower, 10 = 10x slower
+        self.saw_time += (1.0 / 60.0) / slow_factor
+        # Push this into the collider for its sine calculation
+        self.knife.saw_time = self.saw_time
+        # Advance global sim time
+        self.sim_time += self.dt
+        # Feed it into the KnifeCollider
+        self.knife.sim_time = self.sim_time
+
         self.knife.update(self.dt)
 
         # Multi-cut scheduler
@@ -1229,8 +1258,22 @@ class MPMCuttingSim:
             
         # Update position - ensure numpy arrays for vector operations
         self._ee_prev_position = self._ee_position.copy()
-        self._ee_position = np.array(ee_state["pos"], dtype=np.float32)
-        
+
+        base_pos = np.array(ee_state["pos"], dtype=np.float32)
+        self._ee_position = base_pos.copy()
+
+        # Apply saw cut offset in GUI
+        if self.knife.cut_mode == "saw_cut":
+            amp = float(self.knife.saw_amplitude[None])
+            freq = float(self.knife.saw_frequency[None])
+            phase = 2 * np.pi * freq * self.sim_time
+            disp = amp * np.sin(phase)
+
+            if self.knife.saw_axis == "x":
+                self._ee_position[0] += disp
+            else:
+                self._ee_position[2] += disp
+
         # Calculate velocity (position difference / time step)
         if self._frame > 0:  # Skip first frame
             self._ee_velocity = (self._ee_position - self._ee_prev_position) / self.dt

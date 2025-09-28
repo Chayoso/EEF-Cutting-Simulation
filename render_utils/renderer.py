@@ -70,8 +70,8 @@ class MPMRenderer:
                 nd = ti.abs(self.sim.knife.sample(X)) / band_eps
                 self.sim.p_color[p] = self._get_cutting_color(1.0 - nd)
             else:
-                # self.sim.p_color[p] = ti.Vector([1.0, 1.0, 0.0])  # yellow
-                self.sim.p_color[p] = ti.Vector([1.0, 0.0, 0.0])  # red
+                self.sim.p_color[p] = ti.Vector([1.0, 1.0, 0.0])  # yellow
+                # self.sim.p_color[p] = ti.Vector([1.0, 0.0, 0.0])  # red
                 # self.sim.p_color[p] = ti.Vector([0.0, 0.2, 0.0])  # dark green
                 # self.sim.p_color[p] = ti.Vector([1.0, 0.6, 0.4])  # peach color
                 # self.sim.p_color[p] = ti.Vector([0.9, 1.0, 0.85])  # light green
@@ -112,12 +112,14 @@ class MPMRenderer:
             return
         y_anim = float(self.sim.knife.y[None])
         z_off  = float(self.sim.knife.z_off[None])
+        x_off = float(self.sim.knife.x_off[None])  # ← NEW
+
         knife_origin_y = float(self.sim.knife.origin[None][1])
         dy = y_anim - knife_origin_y
 
         base = self.sim._knife_base_xyz
         xyz = np.empty_like(base)
-        xyz[:, 0] = base[:, 0]
+        xyz[:, 0] = base[:, 0] + x_off      # ← APPLY X OFFSET
         xyz[:, 1] = base[:, 1] + dy
         xyz[:, 2] = base[:, 2] + z_off
         self.sim.scene.particles(xyz, radius=self.sim.particle_render_radius * 0.8, color=(0.8, 0.8, 0.8))

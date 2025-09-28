@@ -146,12 +146,35 @@ class KnifeCollider(BaseCollider):
     """
     def __init__(self, sdf_grid, origin, voxel_size, start_y, stop_y,
                  speed, return_speed, z_offset=0.0, friction=0.3,
-                 blade_mask_grid=None, mesh_restitution=0.01, board_shape=None):
+                 blade_mask_grid=None, mesh_restitution=0.01, board_shape=None,
+                 # new saw params
+                 cut_mode: str="cut",
+                 saw_amplitude: float=0.0,
+                 saw_frequency: float=0.0,
+                 saw_axis: str="x",
+                 sim_time: float = 0.0):
         super().__init__(sdf_grid, origin, voxel_size, friction, 0.0, mask_grid=blade_mask_grid)
         self.y = ti.field(dtype=ti.f32, shape=()); self.y[None] = float(start_y)
         self.start_y = float(start_y); self.stop_y = float(stop_y)
         self.speed = float(speed);     self.return_speed = float(return_speed)
+        # store original Z offset
+        self._z_init = float(z_offset)
         self.z_off = ti.field(dtype=ti.f32, shape=()); self.z_off[None] = float(z_offset)
+
+        # X offset for saw oscillation
+        self.x_off = ti.field(dtype=ti.f32, shape=())
+        self.x_off[None] = 0.0
+
+        # cut mode and saw parameters
+        self.sim_time = 0.0
+        self.saw_time = 0.0
+        self.cut_mode = cut_mode
+        self.saw_axis = saw_axis.lower()  # "x" or "z"
+        self.saw_amplitude = ti.field(dtype=ti.f32, shape=())
+        self.saw_amplitude[None] = float(saw_amplitude)
+        self.saw_frequency = ti.field(dtype=ti.f32, shape=())
+        self.saw_frequency[None] = float(saw_frequency)
+
         self._down = ti.field(dtype=ti.i32, shape=()); self._down[None] = 1
         self._knife_yidx_min = getattr(self, "_yidx_min", 0)
         
@@ -210,6 +233,7 @@ class KnifeCollider(BaseCollider):
 
     def update(self, dt: float):
         """Ping-pong between start_y and stop_y with smooth speed control."""
+        t = float(self.sim_time)  # you'll need to store sim_time each frame
         # Ping-pong Y motion (existing)
         if self._down[None] == 1:
             y_new = self.y[None] - dt * self.current_speed[None]
@@ -238,17 +262,37 @@ class KnifeCollider(BaseCollider):
             s += (s0 - s) * (dt / max(1e-4, tau))
         self.current_speed[None] = max(s_min, min(s, s0))
 
+        # Apply saw-cut oscillation
+        if self.cut_mode == "saw_cut":
+            # compute sinusoidal displacement
+            w = 2.0 * 3.14159265 * self.saw_frequency[None]
+            disp = self.saw_amplitude[None] * ti.sin(w * self.saw_time)
+
+            if self.saw_axis == "x":
+                self.x_off[None] = disp
+            else:
+                self.x_off[None] = 0.0
+                self.z_off[None] = disp
+        else:
+            # plain cut: no oscillation in X, but respect whatever
+            # z_off the scheduler just wrote in for this slice.
+            self.x_off[None] = 0.0
+            # NOTE: DO NOT reset self.z_off[None] here!
+
     @ti.func
     def sample(self, p):
-        """SDF sample with animated Y and Z offsets."""
-        return self._sample_grid(self.sdf, p, self.y[None], self.z_off[None])
+        """SDF sample with animated X, Y, and Z offsets."""
+        # shift the query point forward/back by self.x_off
+        p_shift = p + ti.Vector([self.x_off[None], 0.0, 0.0])
+        return self._sample_grid(self.sdf, p_shift, self.y[None], self.z_off[None])
 
     @ti.func
     def sample_mask(self, p):
         """Mask sample with animated Y and Z offsets (1=blade, 0=not blade)."""
         if ti.static(self.mask == None):
             return 1.0
-        return self._sample_grid(self.mask, p, self.y[None], self.z_off[None])
+        p_shift = p + ti.Vector([self.x_off[None], 0.0, 0.0])
+        return self._sample_grid(self.mask, p_shift, self.y[None], self.z_off[None])
 
     @ti.func
     def is_blade(self, p):
