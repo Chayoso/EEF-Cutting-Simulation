@@ -35,7 +35,7 @@ class FPSSampler:
 class FPSExporter:
     """Export particle states at a fixed FPS cadence (NPZ or ASCII PLY)."""
 
-    def __init__(self, out_dir="exports_apple", fmt="npz", with_color=True):  # CHANGE EXPORTS FOR EACH FRUIT
+    def __init__(self, out_dir="exports_banana_saw_cut", fmt="npz", with_color=True):  # CHANGE EXPORTS FOR EACH FRUIT
         self.out_dir = str(out_dir)
         os.makedirs(self.out_dir, exist_ok=True)
         self.fmt = str(fmt).lower()
@@ -96,7 +96,7 @@ class JSONLogger:
       - Knife animation params
     """
 
-    def __init__(self, out_dir="logs", fruit_name="apple"):  # CHANGE FRUIT NAME
+    def __init__(self, out_dir="logs", fruit_name="banana_saw_cut"):  # CHANGE FRUIT NAME
         self.out_dir = str(out_dir)
         self.fruit_name = str(fruit_name)
         os.makedirs(self.out_dir, exist_ok=True)

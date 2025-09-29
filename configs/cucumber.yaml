@@ -29,7 +29,6 @@ cutting_mesh:
   particle_damping: 0.85
   restitution: 0.005
 
-
 # -----------------------------------------------------------------------------
 # Cutting Tool - Knife
 # -----------------------------------------------------------------------------
@@ -37,15 +36,26 @@ knife:
   mesh_path: assets/knife.obj
   sdf_voxel: 160
   blade:
-    axis: Y                        # Blade axis direction
-    fraction: 0.55                 # Blade fraction
+    axis: Y                         # Blade axis direction
+    fraction: 0.55                  # Blade fraction
   motion:
-    knife_start_y: 0.125           # Starting Y position
-    knife_stop_y: -0.01            # Stopping Y position
-    cutting_speed_mps: 6.0         # Cutting speed (m/s)
-    return_speed_mps: 6.0          # Return speed (m/s)
-    z_offset: 0.0                  # Z-axis offset
+    cut_mode: saw_cut               # options: cut, saw_cut
+    knife_start_y: 0.125            # Starting Y position
+    knife_stop_y: -0.01             # Stopping Y position
+    cutting_speed_mps: 8.0 # 1.5    # Cutting speed (m/s)
+    return_speed_mps: 8.0  # 1.5    # Return speed (m/s)
+    z_offset: 0.0                   # Z-axis offset
+    # Saw-cut parameters (only used when cut_mode: saw_cut)
+    saw:
+      amplitude_m: 0.005            # peak oscillation in meters
+      frequency_hz: 2.0             # cycles per second
+      axis: x                       # oscillate along x or z
   friction: 0.03
+  min_speed_floor_ratio: 0.10       # Minimum speed floor: s_min = 0.10 * s0 (0.05~0.15 recommended)
+  speed_resistance:
+    c_norm_scale: 0.35              # Contact normalization scale: c_norm = 0.35 * dx/dt
+    k_quad_per_s: 4.0               # Quadratic coefficient k2 [1/s] (full contact t_half ≈ 1/k2)
+
 # -----------------------------------------------------------------------------
 # Cutting Board
 # -----------------------------------------------------------------------------
@@ -118,12 +128,12 @@ stability:
 # Output and Logging
 # -----------------------------------------------------------------------------
 output:
-  enabled: true                 # Enable output
+  enabled: true                    # Enable output
   fps: 60.0                        # Output frame rate (for testing)
   export:
-    enabled: true                # Enable export
-    out_dir: exports_cucumber               # Export directory
-    format: ply                  # Export format: npz, ply
+    enabled: true                  # Enable export
+    out_dir: exports_cucumber_saw_cut               # Export directory
+    format: ply                    # Export format: npz, ply
   logging:
     enabled: true                  # Enable logging
     out_dir: logs                  # Log directory

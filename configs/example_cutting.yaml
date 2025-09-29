@@ -29,7 +29,6 @@ cutting_mesh:
   particle_damping: 0.8           # Particle damping, try 0.8
   restitution: 0.005               # Restitution coefficient (affects knife speed reduction)
 
-
 # -----------------------------------------------------------------------------
 # Cutting Tool - Knife
 # -----------------------------------------------------------------------------
@@ -58,6 +57,7 @@ knife:
   speed_resistance:
     c_norm_scale: 0.35              # Contact normalization scale: c_norm = 0.35 * dx/dt
     k_quad_per_s: 4.0               # Quadratic coefficient k2 [1/s] (full contact t_half ≈ 1/k2)
+
 # -----------------------------------------------------------------------------
 # Cutting Board
 # -----------------------------------------------------------------------------
